@@ -1,0 +1,11 @@
+*.ilk
+*.pdb
+*.exp
+*.rdi
+*.exe
+build/
+dir1/
+fold1/
+example
+cmd.txt
+*.json
