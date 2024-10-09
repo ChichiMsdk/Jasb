@@ -191,7 +191,7 @@ GetFileList(const char *path, const char *regex)
 {
 	FileList *pList;
 	char **ppFiles;
-	char **ppDir = listFilesIteratively(path);
+	char **ppDir = GetFilesDirIter(path);
 	for (int i = 0; ppDir[i][0]; i++)
 		GetFilesWin(ppDir[i], regex);
 	return pList;
