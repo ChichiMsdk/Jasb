@@ -198,7 +198,7 @@ GetFileList(const char *path, const char *regex)
 }
 
 int
-main(void)
+main(int argc, char **ppArgv)
 {
     /*
 	 * compile("clang", "-Wall -Wextra -Werror", "test.c", "build/test.o");
@@ -208,7 +208,7 @@ main(void)
 
 	char *pFolder = ".";
 	char *pBuildFolder = "build";
-	char *pName = "nobuild";
+	char *pName = "nomake";
 	char *pExtension = ".exe";
 	char *pCompiler = "clang";
 	char *pIncludeDirs = "src";
