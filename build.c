@@ -1,15 +1,47 @@
-#define _CRT_SECURE_NO_WARNINGS
+#ifdef WIN32
+	#define _CRT_SECURE_NO_WARNINGS
+	#define WIN32_LEAN_AND_MEAN
+	#include <windows.h>
+	#include <strsafe.h>
+#elif __linux__
+	#include <stdarg.h>
+	#include <ftw.h>
+	#include <dirent.h>
+	#include <errno.h>
+	#define MAX_PATH 320
+	char pError[1124];
+#endif // WIN32
+	
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <strsafe.h>
-
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 
 #define CC clang
 #define MAX_SIZE_COMMAND 10000
 
+/* NOTE: YES ! All on the heap. */
+typedef struct sFile
+{
+	char *pFileName;
+	char *pObjName;
+	char *pDirName;
+
+	/* NOTE: I'm insecure */
+	int maxSizeForAll;
+
+	/* TODO: make this absolute */
+	char *pFullPath;
+}sFile;
+
+typedef struct FileList
+{
+	char **ppList;
+	sFile *pFiles;
+	int nbElems;
+	int sizeMax;
+}FileList;
+
+#ifdef WIN32
 void
 ErrorExit(LPCTSTR lpszFunction, DWORD dw) 
 { 
@@ -40,32 +72,23 @@ ErrorExit(LPCTSTR lpszFunction, DWORD dw)
     LocalFree(lpDisplayBuf);
     ExitProcess(dw); 
 }
-
-/* NOTE: YES ! All on the heap. */
-typedef struct sFile
+#elif __linux__
+void
+ErrorExit(char *pMsg) 
 {
-	char *pFileName;
-	char *pObjName;
-	char *pDirName;
-
-	/* NOTE: I'm insecure */
-	int maxSizeForAll;
-
-	/* TODO: make this absolute */
-	char *pFullPath;
-}sFile;
-
-typedef struct FileList
-{
-	char **ppList;
-	sFile *pFiles;
-	int nbElems;
-	int sizeMax;
-}FileList;
+	perror(pMsg);
+	exit(1);
+}
+#endif // WIN32
 
 char *
 Compile2(const char *cc, const char *flags, FileList *pList)
 {
+	if (pList->nbElems <= 0)
+	{
+		fprintf(stderr, "No files to compile found ..\n");
+		return NULL;
+	}
 	char *pObjs;
 	for (int i = 0; i < pList->nbElems; i++)
 	{
@@ -75,7 +98,7 @@ Compile2(const char *cc, const char *flags, FileList *pList)
 		size_t totalCount = strlen(cc) + strlen(flags) + strlen(fname) + strlen(outname);
 		snprintf(command, totalCount + 10, "%s %s -c %s -o %s", cc, flags, fname, outname);
 		printf("Command: %s\n", command);
-		system(command);
+		/* system(command); */
 		free(command);
 	}
 
@@ -88,6 +111,10 @@ Compile2(const char *cc, const char *flags, FileList *pList)
 	pObjs = malloc(sizeof(char) * total + (pList->nbElems) + 1);
 	for (int i = 0; i < pList->nbElems; i++)
 		count += sprintf(pObjs + count, "%s ", pList->pFiles[i].pObjName);
+    /*
+	 * printf("Count: %zu\n", count);
+	 * printf("%zu + %d = %zu\n", total, pList->nbElems, total + pList->nbElems);
+     */
 	pObjs[--count] = 0;
 	return pObjs;
 }
@@ -111,10 +138,11 @@ Link(const char *cc, const char *flags, const char *obj, const char *outname)
 	size_t totalCount = strlen(cc) + strlen(flags) + strlen(obj) + strlen(outname);
 	snprintf(command, totalCount + 7, "%s %s %s -o %s", cc, flags, obj, outname);
 	printf("Command: %s\n", command);
-	system(command);
+	/* system(command); */
 	free(command);
 }
 
+#ifdef WIN32
 int
 isValidDirWin(const char *str, DWORD dwAttr)
 {
@@ -125,6 +153,33 @@ isValidDirWin(const char *str, DWORD dwAttr)
 	}
 	return 0;
 }
+#elif __linux__
+
+#define isValidDirWin(...) isValidDirWinImpl(__VA_ARGS__, NULL)
+
+int
+isValidDirWinImpl(const char *pStr, int attr, ...)
+{
+	va_list args;
+	va_start(args, attr);
+	char *pArgStr = NULL;
+	while ((pArgStr = va_arg(args, char *)) != NULL)
+	{
+		if (!strcmp(pArgStr, pStr))
+		{
+			va_end(args);
+			return 0;
+		}
+	}
+	if (strcmp(pStr, ".") && strcmp(pStr, ".."))
+	{
+		if ((unsigned char)attr == DT_DIR)
+			return va_end(args), 1;
+	}
+	va_end(args);
+	return 0;
+}
+#endif // WIN32
 
 void
 findDirWin(const char *path)
@@ -149,6 +204,7 @@ findDirWin(const char *path)
 		}
 	}
 	while (FindNextFile(hFind, &findData) != 0);
+#elif __linux__
 #endif
 }
 
@@ -192,6 +248,7 @@ InitFileList(FileList **ppFileList)
 	return error;
 }
 
+int WildcardMatch(const char *pStr, const char *pPattern);
 /* TODO: Construct absolute path instead of relative */
 void
 GetFilesWin(const char *pPath, const char *pRegex, sFile *pFiles, int *pNb, const char *pBuildFolder)
@@ -234,6 +291,45 @@ GetFilesWin(const char *pPath, const char *pRegex, sFile *pFiles, int *pNb, cons
 	while (FindNextFile(hFind, &findFileData) != 0);
 
 	FindClose(hFind);
+#elif __linux__
+	DIR *pdStream;
+	struct dirent *pdEntry;
+	char pFullPath[1024];
+	char pSearchPath[1024];
+	int index = 0;
+	int j = 0;
+
+	sprintf(pSearchPath, "%s/.", pPath);
+	sprintf(pError, "Couldn't open '%s'", pSearchPath);
+	if ((pdStream = opendir(pSearchPath)) == NULL) { perror(pError); return ; }
+	strncpy(pFiles[*pNb].pDirName, pPath, MAX_PATH);
+	while ((pdEntry = readdir(pdStream)) != NULL)
+	{
+		if (pdEntry->d_type == DT_REG)
+		{
+			if (WildcardMatch(pdEntry->d_name, pRegex))
+			{
+				int lenName = strlen(pdEntry->d_name);
+				sprintf(pFiles[*pNb].pObjName, "%s/", pBuildFolder);
+				int lenObj = strlen(pFiles[*pNb].pObjName);
+				for (int i = 0; i < lenName; i++)
+				{
+					if (pdEntry->d_name[i] == '.')
+					{
+						pFiles[*pNb].pObjName[i + lenObj] = pdEntry->d_name[i];
+						pFiles[*pNb].pObjName[++i + lenObj] = 'o';
+						pFiles[*pNb].pObjName[++i + lenObj] = 0;
+						break;
+					}
+					pFiles[*pNb].pObjName[i + lenObj] = pdEntry->d_name[i];
+				}
+				strncpy(pFiles[*pNb].pFileName, pdEntry->d_name, MAX_PATH);
+				sprintf(pFiles[*pNb].pFullPath, "%s/%s", pPath, pdEntry->d_name);
+				(*pNb)++;
+			}
+		}
+	}
+	closedir(pdStream);
 #endif
 }
 
@@ -241,8 +337,9 @@ GetFilesWin(const char *pPath, const char *pRegex, sFile *pFiles, int *pNb, cons
 
 /* TODO: more robust way please, this is clunky */
 char ** 
-GetFilesDirIter(const char *basePath) 
+GetFilesDirIter(const char *pBasePath) 
 {
+#ifdef WIN32
 	char **ppDir = malloc(sizeof(char *) * STACK_SIZE);
 	for (int i = 0; i < STACK_SIZE; i++)
 	{
@@ -283,6 +380,57 @@ GetFilesDirIter(const char *basePath)
 
 	} while (ppDir[index][0]);
 	return ppDir;
+#elif __linux__
+	DIR *pdStream;
+	struct dirent *pdEntry;
+	char pFullPath[1024];
+	char pSearchPath[1024];
+	int index = 0;
+	int j = 0;
+
+	char **ppDir = malloc(sizeof(char *) * STACK_SIZE);
+	for (int i = 0; i < STACK_SIZE; i++)
+	{
+		ppDir[i] = malloc(sizeof(char) * MAX_PATH);
+		memset(ppDir[i], 0, MAX_PATH);
+	}
+	strncpy(ppDir[index], pBasePath, MAX_PATH);
+
+	do
+	{
+		char *pCurrentPath = ppDir[index];
+		sprintf(pSearchPath, "%s/.", pCurrentPath);
+		sprintf(pError, "Couldn't open '%s'", pSearchPath);
+		if ((pdStream = opendir(pSearchPath)) == NULL) { perror(pError); return NULL; }
+		while ((pdEntry = readdir(pdStream)) != NULL)
+		{
+			if (isValidDirWin(pdEntry->d_name, pdEntry->d_type, ".git"))
+			{
+				j++;
+				memset(pFullPath, 0, sizeof(pFullPath) / sizeof(pFullPath[0]));
+				sprintf(pFullPath, "%s/%s", pCurrentPath, pdEntry->d_name);
+				/* printf("pFullPath[%d] at index[%d]: %s\n", j, index, pFullPath); */
+				if (j < STACK_SIZE) strncpy(ppDir[j], pFullPath, MAX_PATH);
+				else
+				{
+					fprintf(stderr, "Stack overflow:"
+							"too many directories to handle:"
+							" %s\n", pFullPath);
+					goto panic;
+				}
+			}
+		}
+		closedir(pdStream);
+		index++;
+	} while (ppDir[index][0]);
+	return ppDir;
+panic:
+	closedir(pdStream);
+	for (int i = 0; i < STACK_SIZE; i++)
+		free(ppDir[i]);
+	free(ppDir);
+	return NULL;
+#endif // WIN32
 }
 
 /*
@@ -297,11 +445,15 @@ GetFileList(const char *path, const char *regex, const char *pBuildFolder)
 	FileList *pFileList = {0};
 	if ((InitFileList(&pFileList) != 0))
 		return NULL;
-	char **ppDir = GetFilesDirIter(path);
+	char **ppDir = GetFilesDirIter(path); // free this somewhere
 	for (int i = 0; ppDir[i][0]; i++)
 	{
 		GetFilesWin(ppDir[i], regex, pFileList->pFiles, &pFileList->nbElems, pBuildFolder);
 	}
+
+	for (int i = 0; i < STACK_SIZE; i++)
+		free(ppDir[i]);
+	free(ppDir);
 	return pFileList;
 }
 
@@ -330,6 +482,7 @@ MakeCleanImpl(void *none, ...)
 	{
 		if (str)
 		{
+#ifdef WIN32
 			WIN32_FIND_DATA findFileData;
 			HANDLE hFind = FindFirstFile(str, &findFileData);
 			if (hFind == INVALID_HANDLE_VALUE)
@@ -344,9 +497,40 @@ MakeCleanImpl(void *none, ...)
 				remove(findFileData.cFileName);
 			}
 			while (FindNextFile(hFind, &findFileData) != 0);
+#elif __linux__
+#endif // WIN32
 		}
 	}
 	va_end(args);
+}
+
+int
+WildcardMatch(const char *pStr, const char *pPattern)
+{
+	const char *p = pPattern;
+	const char *s = pStr;
+	const char *pStar = NULL;
+
+	while (*pStr)
+	{
+		if (*pPattern == *pStr)
+		{
+			pPattern++;
+			pStr++;
+		}
+		else if (*pPattern == '*')
+			pStar = pPattern++;
+		else if (pStar)
+		{
+			pPattern = pStar++;
+			pStr++;
+		}
+		else
+			return 0;
+	}
+	while (*pPattern == '*')
+		pPattern++;
+	return *pPattern == '\0';
 }
 
 /*
@@ -359,30 +543,24 @@ MakeCleanImpl(void *none, ...)
  * - Add parsing C files for flags.. (like pragma lib)
  */
 
-#include "n.h"
-
 int
 main(int argc, char **ppArgv)
 {
 	/* findDirWin("."); */
 
-	char *pFolder = ".";
-	char *pBuildFolder = ".\\build";
-	char *pName = "nomake";
-	char *pExtension = ".exe";
-	char *pOutput = "test.exe";
-	char *pCompiler = "clang";
-	char *pCompiler2 = "c++";
-	char *pIncludeDirs = "src";
-	char *pLibs = "-g3 -luser32";
-	char *pLibPath = "";
-	char *pCFlags = "-g3 -Wall -Wextra -Werror";
-	char *pMacros = "PLATFORM_WINDOWS";
-	char *pAsan = "";
-	char *pObjs = NULL;
-	char *pObjs2 = NULL;
-	char *pFinal = NULL;
-	FileList *CFiles = GetFileList(pFolder, "test.c", pBuildFolder);
+	char *pFolder = "."; char *pBuildFolder = "build";
+	char *pName = "nomake"; char *pExtension = ".exe";
+	char *pOutput = "test.exe"; char *pCompiler = "clang";
+	char *pCompiler2 = "c++"; char *pIncludeDirs = "src";
+	char *pLibs = "-g3 -luser32"; char *pLibPath = "";
+	char *pCFlags = "-g3 -Wall -Wextra -Werror"; char *pMacros = "PLATFORM_WINDOWS";
+	char *pAsan = ""; char *pObjs = NULL; char *pObjs2 = NULL; char *pFinal = NULL;
+
+	char *str = "src/main.c";
+	char *pattern = "*.c";
+	char **ppDir = NULL;
+
+	FileList *CFiles = GetFileList(pFolder, "*.c", pBuildFolder);
 	FileList *CPPFiles = GetFileList(pFolder, "*.cpp", pBuildFolder);
 
     /*
@@ -393,9 +571,11 @@ main(int argc, char **ppArgv)
      */
 
 	pObjs = Compile2(pCompiler, pCFlags, CFiles);
+	if (!pObjs)
+		pObjs = "";
 	/* pObjs2 = Compile2(pCompiler2, pCFlags, CPPFiles); */
 	pFinal = malloc(sizeof(char) * strlen(pOutput) + strlen(pBuildFolder) + 2);
-	size_t count = sprintf(pFinal, "%s\\%s", pBuildFolder, pOutput);
+	size_t count = sprintf(pFinal, "%s/%s", pBuildFolder, pOutput);
 	pFinal[count--] = 0;
 	Link(pCompiler, pLibs, pObjs, pFinal);
 	/* MakeClean("*.rdi", "*lib", "*.pdb", "*.exe", "*.exp", "*.o"); */
@@ -406,7 +586,8 @@ main(int argc, char **ppArgv)
      */
 
 	free(pFinal);
-	free(pObjs);
+	if (strlen(pObjs) > 0)
+		free(pObjs);
 	free(pObjs2);
 	DestroyFileList(CFiles);
 	DestroyFileList(CPPFiles);
