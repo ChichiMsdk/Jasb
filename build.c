@@ -111,8 +111,10 @@ Compile2(const char *cc, const char *flags, FileList *pList)
 	pObjs = malloc(sizeof(char) * total + (pList->nbElems) + 1);
 	for (int i = 0; i < pList->nbElems; i++)
 		count += sprintf(pObjs + count, "%s ", pList->pFiles[i].pObjName);
-	printf("Count: %zu\n", count);
-	printf("%zu + %d = %zu\n", total, pList->nbElems, total + pList->nbElems);
+    /*
+	 * printf("Count: %zu\n", count);
+	 * printf("%zu + %d = %zu\n", total, pList->nbElems, total + pList->nbElems);
+     */
 	pObjs[--count] = 0;
 	return pObjs;
 }
@@ -308,7 +310,7 @@ GetFilesWin(const char *pPath, const char *pRegex, sFile *pFiles, int *pNb, cons
 			if (WildcardMatch(pdEntry->d_name, pRegex))
 			{
 				int lenName = strlen(pdEntry->d_name);
-				sprintf(pFiles[*pNb].pObjName, "%s\\", pBuildFolder);
+				sprintf(pFiles[*pNb].pObjName, "%s/", pBuildFolder);
 				int lenObj = strlen(pFiles[*pNb].pObjName);
 				for (int i = 0; i < lenName; i++)
 				{
@@ -321,6 +323,9 @@ GetFilesWin(const char *pPath, const char *pRegex, sFile *pFiles, int *pNb, cons
 					}
 					pFiles[*pNb].pObjName[i + lenObj] = pdEntry->d_name[i];
 				}
+				strncpy(pFiles[*pNb].pFileName, pdEntry->d_name, MAX_PATH);
+				sprintf(pFiles[*pNb].pFullPath, "%s/%s", pPath, pdEntry->d_name);
+				(*pNb)++;
 			}
 		}
 	}
@@ -533,7 +538,7 @@ main(int argc, char **ppArgv)
 {
 	/* findDirWin("."); */
 
-	char *pFolder = "."; char *pBuildFolder = ".\\build";
+	char *pFolder = "."; char *pBuildFolder = "build";
 	char *pName = "nomake"; char *pExtension = ".exe";
 	char *pOutput = "test.exe"; char *pCompiler = "clang";
 	char *pCompiler2 = "c++"; char *pIncludeDirs = "src";
@@ -545,13 +550,7 @@ main(int argc, char **ppArgv)
 	char *pattern = "*.c";
 	char **ppDir = NULL;
 
-    /*
-	 * if (ftw(".", fn, 10) != 0)
-	 * { perror("ftw"); exit(1); }
-	 * exit(1);
-     */
-
-	FileList *CFiles = GetFileList(pFolder, "test.c", pBuildFolder);
+	FileList *CFiles = GetFileList(pFolder, "*.c", pBuildFolder);
 	FileList *CPPFiles = GetFileList(pFolder, "*.cpp", pBuildFolder);
 
     /*
@@ -566,7 +565,7 @@ main(int argc, char **ppArgv)
 		pObjs = "";
 	/* pObjs2 = Compile2(pCompiler2, pCFlags, CPPFiles); */
 	pFinal = malloc(sizeof(char) * strlen(pOutput) + strlen(pBuildFolder) + 2);
-	size_t count = sprintf(pFinal, "%s\\%s", pBuildFolder, pOutput);
+	size_t count = sprintf(pFinal, "%s/%s", pBuildFolder, pOutput);
 	pFinal[count--] = 0;
 	Link(pCompiler, pLibs, pObjs, pFinal);
 	/* MakeClean("*.rdi", "*lib", "*.pdb", "*.exe", "*.exp", "*.o"); */
