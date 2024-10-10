@@ -285,7 +285,12 @@ GetFilesDirIter(const char *basePath)
 	return ppDir;
 }
 
-/* TODO: Add option: iterative or not */
+/*
+ * TODO:
+ * - Add option: iterative or not
+ * - Add va_args to specify multiple files manually
+ */
+
 FileList *
 GetFileList(const char *path, const char *regex, const char *pBuildFolder)
 {
@@ -347,6 +352,11 @@ MakeCleanImpl(void *none, ...)
 /*
  * NOTE: Yes I malloc and no we don't care
  * I should probably check them tho..
+ */
+
+/*
+ * TODO: 
+ * - Add parsing C files for flags.. (like pragma lib)
  */
 
 #include "n.h"
