@@ -1,2 +1,2 @@
 all:
-	clang -g3 build.c -o build.exe -luser32
+	clang -std=gnu2x -fsanitize=address -g3 build.c -o build/nomake.exe -luser32
