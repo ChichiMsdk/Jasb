@@ -19,3 +19,4 @@ tags
 .make
 .ignore
 builder/compile_commands.c
+compile_flags.txt
