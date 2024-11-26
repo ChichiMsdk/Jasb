@@ -18,3 +18,4 @@ tags
 .cmds
 .make
 .ignore
+builder/compile_commands.c
