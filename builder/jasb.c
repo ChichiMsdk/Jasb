@@ -7,6 +7,8 @@
  | differ from os and shell's this one should actually be portable.           |
  ******************************************************************************/
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "jasb.h"
 #include "jasb_execute.h"
 #include "jasb_utils.h"
@@ -248,7 +250,7 @@ JoinThreads(threadStruct* pArgs, thrd_t* pThreads, size_t elemCount)
 		}
 	}
 	TracyCZoneEnd(ctx);
-	printf("\n");
+	/* printf("\n"); */
 	return Y_SUCCESS;
 
 ReturnError:
@@ -300,32 +302,40 @@ CompileCfiles(Command* pCmd, FileList* pList, char **ppOut, bool silent, bool bM
 			pPchFlag = "-include-pch src"SLASH"pch"SLASH"stb_image_pch.h.pch"
 				" -include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
 
-			pTimeReportFlag = "-ftime-trace";
+			pTimeReportFlag = "";
 		}
 		else
 		{
 			pTimeReportFlag = "";
-			pTimeReportFlag = "-ftime-trace";
 			pPchFlag = "-include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
+			pPchFlag = "";
 		}
 
 		SELF_APPEND_SPACE(ppJson[i], a.pCc, pTimeReportFlag, a.pCflags, a.pDefines, a.pIncludeDirs, pPchFlag);
 		SELF_APPEND_SPACE(ppJson[i], MODEFLAG, pFilePath, OUTFLAG, pOutputName);
 		/* SELF_APPEND_SPACE(ppJson[i], a.pCC, a.pCFLAGS, a.pDEFINES, a.pINCLUDE_DIRS, MODEFLAG, fname, OUTFLAG, outname); */
+		bool bExec = false;
+		if (IsOutdated(pFilePath, pOutputName))
+		{
+			bExec = true;
+		}
 
 		if (bMultiThread)
 		{
 			pArgs[i].pThreadName = pFilePath;
+			pArgs[i].pDependencyPath = pFilePath;
+			pArgs[i].pTargetPath = pOutputName;
 			pArgs[i].silent = silent;
 			pArgs[i].debug	= debug;
 			pArgs[i].id = i;
 			pArgs[i].finished = false;
 			pArgs[i].pCmd = ppJson[i];
+			pArgs[i].noExec = bExec;
 			thrd_create(&pThreads[i], ThreadExec, &pArgs[i]);
 		}
 		else
 		{
-			result = EXECUTE(ppJson[i], pFilePath, silent, debug);
+			result = EXECUTE(ppJson[i], pFilePath, pOutputName, silent, debug);
 			if (result != 0)
 			{
 				MultiFree(pThreads, ppJson, pArgs);
@@ -360,7 +370,7 @@ CompileCfiles(Command* pCmd, FileList* pList, char **ppOut, bool silent, bool bM
 }
 
 yError
-Link(Command* pCmd, const char *pObj, const char *pOutName, bool silent, bool debug)
+Link(Command* pCmd, char *pObj, const char *pOutName, bool silent, bool debug)
 {
 	char *pCommand = STR("");
 	Command a = *pCmd;
@@ -368,6 +378,7 @@ Link(Command* pCmd, const char *pObj, const char *pOutName, bool silent, bool de
 	char*	OUTFLAG		= NULL;
 	char*	MODEFLAG	= NULL;
 	char*	LLD_FLAGS	= STR("-fuse-ld=lld");
+	bool	bRebuild	= false;
 	/* char*	LLD_FLAGS	= STR(""); */
 
 	if (StrIsEqual("clang", pCmd->pCc) || StrIsEqual("gcc", pCmd->pCc))
@@ -375,13 +386,27 @@ Link(Command* pCmd, const char *pObj, const char *pOutName, bool silent, bool de
 		OUTFLAG = STR("-o");
 		MODEFLAG = STR("-c");
 	}
+	char* pTemp = STR(pObj);
+	char* pToken = strtok(pTemp, " ");
+	while (pToken != NULL)
+	{
+		if (IsOutdated(pToken, pOutName))
+			bRebuild = true;
+		pToken = strtok(NULL, " ");
+	}
+
+	if (bRebuild == false)
+	{
+		printf("Nothing to be done.\n");
+		return Y_SUCCESS;
+	}
 
 	/* SELF_APPEND_SPACE(pCommand, a.pCC, a.pCFLAGS, a.pDEFINES, pObj, OUTFLAG, pOutName, pCmd->pLIB_PATH, pCmd->pLIBS); */
 	SELF_APPEND_SPACE(pCommand, a.pCc, LLD_FLAGS, a.pCflags, a.pDefines);
 	SELF_APPEND_SPACE(pCommand, pObj, OUTFLAG, pOutName, pCmd->pLibPath, pCmd->pLibs);
 
 	TracyCZoneNC(linkingpart, "Link", 0x00001, 1);
-	JASB_CHECK(EXECUTE(pCommand, pOutName, silent, debug));
+	JASB_CHECK(EXECUTE(pCommand, pOutName, pOutName, silent, debug));
 	TracyCZoneEnd(linkingpart);
 	return Y_SUCCESS;
 }
@@ -462,7 +487,7 @@ CompileShaders(void* args)
 		}
 	}
 	TracyCZoneEnd(ctx);
-	printf("\n");
+	/* printf("\n"); */
 
 	free(pThreads);
 	free(pArgs);
@@ -523,6 +548,17 @@ Build(Command* pCmd, FileList* pCfilesList, FileList* pShadersList, bool bMultiT
 	return Y_SUCCESS;
 }
 
+long long
+GetTimeNanosecond(void)
+{
+    LARGE_INTEGER frequency, counter;
+
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return (counter.QuadPart * 1000000000LL) / frequency.QuadPart;
+}
+
+#include <time.h>
 /*
  * TODO: 
  * - Multithreading -> CrossPlatform = boring for this lots of lines
@@ -531,7 +567,11 @@ Build(Command* pCmd, FileList* pCfilesList, FileList* pShadersList, bool bMultiT
 int
 main(int argc, char **ppArgv)
 {
+	TracyCZoneNC(sleeping, "Sleeper", 0xFF00FF, 1);
+	/* Sleep(500); */
+	TracyCZoneEnd(sleeping);
 	TracyCZoneNC(mainfunc, "main function", 0x00FF00, 1);
+
 
 	if (ArgsCheck(argc, ppArgv) == false)
 		return 1;
@@ -582,7 +622,7 @@ main(int argc, char **ppArgv)
 	FileList *pListShaders = GetFileListAndSpv(&cmd, "*");
 	if (!pListShaders) { fprintf(stderr, "Something happened in shaders\n"); return 1; }
 
-	bool bMultiThread = false;
+	bool bMultiThread = true;
 	bool bDebug = false;
 	/* NOTE: Build everything */
 	yError result = Build(&cmd, pListCfiles, pListShaders, bMultiThread, bDebug);
@@ -598,7 +638,7 @@ main(int argc, char **ppArgv)
 	DestroyFileList(pListCfiles);
 	DestroyFileList(pListCppFiles);
 	ChefDestroy();
-	printf("String allocations: %zu\n", gChef.nbElems);
+	/* printf("String allocations: %zu\n", gChef.nbElems); */
 
 	TracyCZoneEnd(mainfunc);
 

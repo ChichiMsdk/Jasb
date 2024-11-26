@@ -40,24 +40,26 @@ ThreadExecShaders(void* args)
 	{
 		if (argsStruct->debug == true)
 		{
-			printf("%s\n\n", argsStruct->pCmd);
+			printf("%s\n", argsStruct->pCmd);
 			argsStruct->finished = true;
 			TracyCZoneEnd(threading);
 			thrd_exit(code);
 		}
 
 		if (argsStruct->silent == false)
-			printf("%s\n\n", argsStruct->pCmd);
+			printf("%s\n", argsStruct->pCmd);
 
 		TracyCZoneNC(syscall, "System call", 0x8888ff, 1);
 		code = system(argsStruct->pCmd);
 		TracyCZoneEnd(syscall);
 	}
 	else
-		if (argsStruct->silent == false)
-			printf("%s is up to date.\n", argsStruct->pTargetPath);
-	
-
+	{
+        /*
+		 * if (argsStruct->silent == false)
+		 * 	printf("%s is up to date.\n", argsStruct->pTargetPath);
+         */
+	}
 	argsStruct->finished = true;
 	TracyCZoneEnd(threading);
 	thrd_exit(code);
@@ -69,6 +71,12 @@ ThreadExec(void* args)
 	int				code		= 0;
 	threadStruct*	argsStruct	= (threadStruct*)(args) ;
 	char			buf[100];
+	if (argsStruct->noExec == false)
+	{
+		argsStruct->finished = true;
+		thrd_exit(code);
+		return code;
+	}
 
 	sprintf(buf, "Thread %d", argsStruct->id);
 
@@ -79,20 +87,29 @@ ThreadExec(void* args)
 
 	TracyCMessage(argsStruct->pThreadName, strlen(argsStruct->pThreadName));
 	
-	if (argsStruct->debug == true)
+	if (IsOutdated(argsStruct->pDependencyPath, argsStruct->pTargetPath))
 	{
-		printf("%s\n\n", argsStruct->pCmd);
-		argsStruct->finished = true;
-		TracyCZoneEnd(threading);
-		thrd_exit(code);
+		if (argsStruct->debug == true)
+		{
+			printf("%s\n", argsStruct->pCmd);
+			argsStruct->finished = true;
+			TracyCZoneEnd(threading);
+			thrd_exit(code);
+		}
+		if (argsStruct->silent == false)
+			printf("%s\n", argsStruct->pCmd);
+
+		TracyCZoneNC(syscall, "System call", 0x8888ff, 1);
+		code = system(argsStruct->pCmd);
+		TracyCZoneEnd(syscall);
 	}
-
-	if (argsStruct->silent == false)
-		printf("%s\n\n", argsStruct->pCmd);
-
-	TracyCZoneNC(syscall, "System call", 0x8888ff, 1);
-	code = system(argsStruct->pCmd);
-	TracyCZoneEnd(syscall);
+	else
+	{
+        /*
+		 * if (argsStruct->silent == false)
+		 * 	printf("%s is up to date.\n", argsStruct->pTargetPath);
+         */
+	}
 
 	argsStruct->finished = true;
 
@@ -102,21 +119,31 @@ ThreadExec(void* args)
 }
 
 int
-ExecuteImpl(const char* pCommand, const char* pFile, bool silent, bool debug)
+ExecuteImpl(const char* pCommand, const char* pFile, const char* pTarget, bool silent, bool debug)
 {
 	TracyCZoneNC(execute, __FUNCTION__, 0x8800ff, 1);
 	TracyCMessage(pFile, strlen(pFile));
 
 	int code = 0;
-	if (debug == true)
+	if (IsOutdated(pFile, pTarget))
 	{
-		printf("%s\n\n", pCommand);
-		TracyCZoneEnd(execute);
-		return code;
+		if (debug == true)
+		{
+			printf("%s\n", pCommand);
+			TracyCZoneEnd(execute);
+			return code;
+		}
+		if (silent == false)
+			printf("%s\n", pCommand);
+		code = system(pCommand);
 	}
-	if (silent == false)
-		printf("%s\n\n", pCommand);
-	code = system(pCommand);
+	else
+	{
+        /*
+		 * if (silent == false)
+		 * 	printf("%s is up to date.\n", pFile);
+         */
+	}
 
 	TracyCZoneEnd(execute);
 	return code;

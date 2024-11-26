@@ -138,7 +138,7 @@ GetFileListAndObjs(Command* pCmd, const char* pRegex)
 	char **ppDir = GetFilesDirIter(pCmd->pRootFolder); // free this somewhere
 	for (int i = 0; ppDir[i][0]; i++)
 	{
-		GetFilesAndObj(ppDir[i], pRegex, pFileList->pFiles, &pFileList->elemCount, pCmd->pBuildDir);
+		GetFilesAndObj(ppDir[i], pRegex, pFileList->pFiles, &pFileList->elemCount, pCmd->pObjDir);
 	}
 	for (int i = 0; i < STACK_SIZE; i++)
 		free(ppDir[i]);

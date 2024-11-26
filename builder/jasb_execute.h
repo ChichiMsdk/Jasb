@@ -12,6 +12,7 @@ typedef struct threadStruct
 	char*			pDependencyPath;
 	bool			silent;
 	bool			debug;
+	bool			noExec;
 	int				id;
 	_Atomic _Bool	finished;
 
@@ -19,10 +20,10 @@ typedef struct threadStruct
 
 int	ThreadExecShaders(void* args);
 int ThreadExec(void* args);
-int ExecuteImpl(const char* pCommand, const char* pFile, bool dry, bool debug);
+int ExecuteImpl(const char* pCommand, const char* pFile, const char* pTarget, bool dry, bool debug);
 int IsOutdated(const char* pDependency, const char* pTarget);
 
-#define EXECUTE(x, str, y, z) ExecuteImpl(x, str, y, z)
+#define EXECUTE(x, str, str2, y, z) ExecuteImpl(x, str, str2, y, z)
 
 #endif //JASB_EXECUTE_H
 
