@@ -12,6 +12,7 @@ typedef enum yError {
 	Y_ERROR_JSON		= 0x06,
 	Y_ERROR_THREAD		= 0x07,
 	Y_ERROR_JOIN_THREAD	= 0x08,
+	Y_ERROR_CLEANING	= 0x08,
 	Y_MAX_ERROR
 }yError;
 

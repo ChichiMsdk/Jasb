@@ -25,6 +25,7 @@
 #ifdef _WIN32
 
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "shell32.lib")
 
 	#define TRACY_PATH "C:\\Lib\\tracy-0.11.1\\public"
 	#define TRACYTRACY_PATH "C:\\Lib\\tracy-0.11.1\\public\\tracy"

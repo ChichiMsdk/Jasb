@@ -17,3 +17,9 @@ GetErrorMsg(int error)
 {
 	return pErrorMsg[error];
 }
+
+#ifdef _WIN32
+
+#elif __linux__
+
+#endif

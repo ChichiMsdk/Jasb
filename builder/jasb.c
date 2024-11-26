@@ -22,6 +22,7 @@ MemChef gChef = {0};
 
 #pragma comment(lib, "shlwapi.lib")
 
+bool gbClean = false;
 bool gbDebug = true;
 bool gbRelease = false;
 
@@ -217,6 +218,8 @@ ArgsCheck(int argc, char** ppArgv)
 			gbAsan = true;
 			continue;
 		}
+		if (StrIsEqual(ppArgv[i], "clean"))
+			gbClean = true;
 	}
 	return true;
 }
@@ -558,6 +561,24 @@ GetTimeNanosecond(void)
     return (counter.QuadPart * 1000000000LL) / frequency.QuadPart;
 }
 
+yError
+Clean(Command* pCmd)
+{
+	DWORD dw;
+
+	if (gbClean == false)
+		return Y_SUCCESS;
+
+	int a = DeleteDirectory(pCmd->pBuildDir);
+	if (a == 0)
+	{
+		dw = GetLastError();
+		PrintErrorMessage(dw);
+		return Y_ERROR_CLEANING;
+	}
+	return Y_SUCCESS;
+}
+
 #include <time.h>
 /*
  * TODO: 
@@ -567,80 +588,49 @@ GetTimeNanosecond(void)
 int
 main(int argc, char **ppArgv)
 {
-	TracyCZoneNC(sleeping, "Sleeper", 0xFF00FF, 1);
-	/* Sleep(500); */
-	TracyCZoneEnd(sleeping);
 	TracyCZoneNC(mainfunc, "main function", 0x00FF00, 1);
 
-
+	ChefInit();
 	if (ArgsCheck(argc, ppArgv) == false)
 		return 1;
-
-	ChefInit();
 	Command cmd = CommandInit();
 
-    /*
-	 * DWORD dw;
-	 * int a = DeleteDirectory(cmd.pBUILD_DIR);
-	 * if (a == 0)
-	 * {
-	 * 	dw = GetLastError();
-	 * }
-     */
+	Clean(&cmd);
 
-	if (ISDIRECTORY(cmd.pObjDir) == false || DoesExist(cmd.pObjDir) == false)
-	{
-		if (MKDIR(cmd.pBuildDir) == false )
-		{
-			fprintf(stderr, "%s:%d ", __FILE__, __LINE__);
-			ERROR_EXIT("Mkdir: ");
-		}
-		if (MKDIR(cmd.pObjDir) == false )
-		{
-			fprintf(stderr, "%s:%d ", __FILE__, __LINE__);
-			ERROR_EXIT("Mkdir: ");
-		}
-	}
-
-	if (ISDIRECTORY(cmd.pShaderObjsDir) == false || DoesExist(cmd.pShaderObjsDir) == false)
-	{
-		if (MKDIR(cmd.pShaderObjsDir) == false )
-		{
-			fprintf(stderr, "%s:%d ", __FILE__, __LINE__);
-			ERROR_EXIT("Mkdir: ");
-		}
-	}
+	MKDIR(cmd.pObjDir);
+	MKDIR(cmd.pShaderObjsDir);
 
 	YMB char *pCompileCommands = STR("compile_commands.json");
 
+	/* NOTE: Get C source files in src/ recursively */
 	FileList *pListCfiles = GetFileListAndObjs(&cmd, "*.c");
 	if (!pListCfiles) { fprintf(stderr, "Something happened in c\n"); return 1; }
 
+	/* NOTE: Get Cpp source files in src/ recursively */
 	FileList *pListCppFiles = GetFileListAndObjs(&cmd, "*.cpp");
 	if (!pListCppFiles) { fprintf(stderr, "Something happened in cpp\n"); return 1; }
 
+	/* NOTE: Get shader files in src/shaders directory */
 	FileList *pListShaders = GetFileListAndSpv(&cmd, "*");
 	if (!pListShaders) { fprintf(stderr, "Something happened in shaders\n"); return 1; }
 
 	bool bMultiThread = true;
 	bool bDebug = false;
+
 	/* NOTE: Build everything */
 	yError result = Build(&cmd, pListCfiles, pListShaders, bMultiThread, bDebug);
 	if ( result != Y_SUCCESS)
 	{ fprintf(stderr, "%s\n", GetErrorMsg(result)); return 1; }
 
-
     /*
 	 * if (ClangCompileCommandsJson(pCompileCommands))
 	 * 	goto exiting;
      */
-
 	DestroyFileList(pListCfiles);
 	DestroyFileList(pListCppFiles);
 	ChefDestroy();
 	/* printf("String allocations: %zu\n", gChef.nbElems); */
 
 	TracyCZoneEnd(mainfunc);
-
 	return 0;
 }

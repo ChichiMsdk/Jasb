@@ -156,6 +156,26 @@ PrintFileList(FileList *pList)
 	}
 }
 
+void
+DirectoryEnsureExists(const char* pPath)
+{
+    /*
+	 * if (ISDIRECTORY(cmd.pObjDir) == false || DoesExist(cmd.pObjDir) == false)
+	 * {
+	 * 	if (MKDIR(cmd.pBuildDir) == false )
+	 * 	{
+	 * 		fprintf(stderr, "%s:%d ", __FILE__, __LINE__);
+	 * 		ERROR_EXIT("Mkdir: ");
+	 * 	}
+	 * 	if (MKDIR(cmd.pObjDir) == false )
+	 * 	{
+	 * 		fprintf(stderr, "%s:%d ", __FILE__, __LINE__);
+	 * 		ERROR_EXIT("Mkdir: ");
+	 * 	}
+	 * }
+     */
+}
+
 
 #ifdef _WIN32
 /*
@@ -414,14 +434,18 @@ ErrorExit(char* lpszFunction, unsigned long dw)
         dw,
         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
         (LPTSTR) &lpMsgBuf,
-        0, NULL );
+        0,
+		NULL);
 
-    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT, 
-        (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR)); 
+	lpDisplayBuf = LocalAlloc(
+			LMEM_ZEROINIT,
+			(lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR)); 
+
     StringCchPrintf((LPTSTR)lpDisplayBuf, 
         LocalSize(lpDisplayBuf) / sizeof(TCHAR),
         TEXT("%s failed with error %d: %s"), 
         lpszFunction, dw, lpMsgBuf); 
+
 	fprintf(stderr, "%s\n", (char*)lpDisplayBuf);
 
     LocalFree(lpMsgBuf);
@@ -429,10 +453,82 @@ ErrorExit(char* lpszFunction, unsigned long dw)
     ExitProcess(dw); 
 }
 
-bool
-MkdirImpl(char *pStr)
+/* WARN: You need to free lpMsgBuf.. */
+char *
+GetErrorMessageStr(unsigned long dw)
 {
-	return CreateDirectory(pStr, NULL);
+    LPVOID lpMsgBuf;
+    LPVOID lpDisplayBuf;
+
+    FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+        FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        dw,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPTSTR) &lpMsgBuf,
+        0,
+		NULL);
+
+	return lpMsgBuf;
+}
+
+void
+PrintErrorMessage(unsigned long dw)
+{
+	char* buf = GetErrorMessageStr(dw);
+	fprintf(stderr, "%s", buf);
+	LocalFree(buf);
+}
+
+void
+PrintErrorMessageCustom(char* s, unsigned long dw)
+{
+	char* buf = GetErrorMessageStr(dw);
+	fprintf(stderr, "\"%s\": %s", s, buf);
+	LocalFree(buf);
+}
+
+#include <shlobj.h>
+bool
+MkdirImpl(char *pPath)
+{
+	char* pStr = ChefStrPath(pPath); 
+	/* printf("pStr: %s\n", pStr); */
+	char *finalPath = NULL;
+	char pCwd[MAX_PATH];
+	int error = GetCurrentDirectory(MAX_PATH, pCwd);
+
+	if (strstr(pStr, pCwd) == NULL)
+	{
+		size_t lenCwd = strlen(pCwd);
+		size_t lenStr = strlen(pStr);
+		finalPath = malloc(sizeof(char) * (lenCwd + lenStr + 1));
+		sprintf(finalPath, "%s\\%s", pCwd, pStr);
+	}
+	else
+		finalPath = pStr;
+
+	error = SHCreateDirectoryExA(NULL, finalPath, NULL);
+	/* BOOL code = CreateDirectory(finalPath, NULL); */
+
+	if (error != ERROR_SUCCESS)
+	{
+		DWORD dw = GetLastError();
+		if (dw == ERROR_ALREADY_EXISTS || dw == ERROR_FILE_EXISTS)
+			error = true;
+		else
+		{
+			PrintErrorMessageCustom(finalPath, dw);
+			error = false;
+		}
+	}
+	else
+		printf("Creating \"%s\"...\n", finalPath);
+
+	free(finalPath);
+	return error;
 }
 
 void

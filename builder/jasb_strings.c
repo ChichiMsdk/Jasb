@@ -6,6 +6,21 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+char*
+ChefStrPath(const char* pPath)
+{
+	char *pNew = STR((char*) pPath);
+	size_t size = strlen(pNew);
+	size_t i = 0;
+	while (i < size)
+	{
+		if (pNew[i] == '/' || pNew[i] == '\\')
+			pNew[i] = SLASH[0];
+		i++;
+	}
+	return pNew;
+}
+
 bool
 StrIsEqual(const char* s1, const char* s2)
 {

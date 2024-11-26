@@ -127,7 +127,8 @@ FileList*	GetFileList(const char* pPath, const char* pRegex);
 
 FileList*	GetFileListAndSpv(Command* pCmd, const char* pRegex);
 FileList*	GetFileListAndObjs(Command* pCmd, const char* pRegex);
-
+void		DirectoryEnsureExists(const char* pPath);
+void		PrintErrorMessage(unsigned long dw);
 void		PrintFileList(FileList *pList);
 
 void		PerrorLog(char *pMsg, char *pFile, int line);

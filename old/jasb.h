@@ -35,6 +35,7 @@ char *pErrorMsg[] = {
 	"Build couldn't finish.",
 	"Link couldn't finish.",
 	"Json couldn't not be created.",
+	"Clean function did not succeed.",
 };
 
 #define GetErrorMsg(a) pErrorMsg[a]

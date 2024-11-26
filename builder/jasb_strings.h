@@ -7,8 +7,10 @@
 #include <stdbool.h>
 
 #ifdef _WIN32
+#define SLASH "\\"
 #define STRDUP(str) _strdup(str)
 #elif __linux__
+#define SLASH "/"
 #define STRDUP(str) strdup(str)
 #endif
 
@@ -39,6 +41,7 @@ char*	ChefStrAppendImpl(char *pDst, ...);
 char*	ChefStrAppendWithFlagsImpl(char *pDst, char *pFlag, ...);
 char*	ChefStrPrependWithFlagsImpl(char *pDst, char *pFlag, ...);
 char*	ChefStrSurroundImpl(char *pDst, char *pSurround);
+char*	ChefStrPath(const char* pPath);
 
 #define STR(a) ChefStrDup(a)
 #define SELF_APPEND(a, ...) a = ChefStrAppendImpl(a, __VA_ARGS__, NULL)
