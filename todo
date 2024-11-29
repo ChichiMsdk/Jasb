@@ -1,0 +1,4 @@
+- IO output is block buffered for the threads -> use non blocking OS specifc pipes 
+- Colors for output clarity
+- pthreads and Win32 threads support (might not be that necessary for win32 since threads.h)
+- Enjoy japan
