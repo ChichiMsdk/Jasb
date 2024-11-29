@@ -10,11 +10,12 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "jasb.h"
-#include "jasb_execute.h"
-#include "jasb_utils.h"
-#include "jasb_strings.h"
-#include "jasb_errors.h"
-#include "jasb_execute.h"
+#include "jasb_execute.c"
+#include "jasb_utils.c"
+#include "jasb_strings.c"
+#include "jasb_errors.c"
+#include "jasb_execute.c"
+#include "jasb_threads.c"
 
 #include "TracyC.h"
 
@@ -27,7 +28,7 @@ bool gbDebug = true;
 bool gbRelease = false;
 
 bool gbTracy = false;
-bool gbAsan = true;
+bool gbAsan = false;
 bool gbTest = false;
 
 bool gbVulkan = true;
@@ -50,13 +51,14 @@ CommandInit(void)
 		.pExtension = STR(EXTENSION),
 		.pBuildDir = STR("build"),
 		.pObjDir = STR("build" SLASH "obj"),
-		.pCc = STR("clang"),
-		.pCpp = STR("clang++"),
+		.pCc = STR("clang-cl"),
+		.pCpp = STR("clang-cl"),
+		.pLinker = STR("link"),
 		.pGlslc = STR("glslc"),
 		.pSrcDir = STR("src"),
 		.pShaderDir = STR("src" SLASH "shaders"),
 		.pShaderObjsDir = STR("build" SLASH "obj" SLASH "shaders"),
-		.pCflags = STR(""),
+		.pCflags = STR("/FS"),
 		.pLibPath = STR(""),
 		.pIncludeDirs = STR(""),
 		.pLibs = STR(""),
@@ -75,7 +77,7 @@ CommandInit(void)
 		INCLUDEFLAG = STR("-I");
 		LIBFLAG = STR("-L");
 		LIBDEPEND = STR("-l");
-		SELF_APPEND(cmd.pCflags, "-Wall -Wextra");
+		SELF_APPEND(cmd.pCflags, " -Wall -Wextra");
 		SELF_APPEND(cmd.pCflags, " -g3");
 		SELF_APPEND(cmd.pCflags, " -fno-inline", " -fno-omit-frame-pointer");
 		SELF_APPEND(cmd.pCflags, " -Wno-missing-field-initializers", " -Wno-unused-but-set-variable");
@@ -90,9 +92,23 @@ CommandInit(void)
 		DEBUGMODEFLAGS = STR("/Od");
 		DEFINEFLAG = STR("/D");
 		INCLUDEFLAG = STR("/I");
-		LIBFLAG = STR("/L");
+		LIBFLAG = STR("/LIBPATH:");
 		LIBDEPEND = STR(".lib");
-		SELF_APPEND(cmd.pCflags, "/Wall");
+		SELF_APPEND(cmd.pCflags, " /Wall");
+		if (StrIsEqual("cl", cmd.pCc))
+			SELF_APPEND(cmd.pCflags, " /std:clatest");
+		if (StrIsEqual("clang-cl", cmd.pCc))
+		{
+			SELF_APPEND(cmd.pCflags, " -Wno-unsafe-buffer-usage -Wno-static-in-inline -Wno-switch-enum -Wno-float-equal");
+			SELF_APPEND(cmd.pCflags, " -Wno-pre-c11-compat -Wno-c23-extensions -Wno-documentation -Wno-documentation-pedantic");
+			SELF_APPEND(cmd.pCflags, " -Wno-declaration-after-statement -Wno-extra-semi-stmt");
+			SELF_APPEND(cmd.pCflags, " -Wno-gnu-zero-variadic-macro-arguments -Wno-language-extension-token");
+			SELF_APPEND(cmd.pCflags, " -Wno-double-promotion -Wno-shorten-64-to-32 -Wno-implicit-int-conversion");
+			SELF_APPEND(cmd.pCflags, " -Wno-implicit-int-float-conversion -Wno-reserved-identifier");
+			SELF_APPEND(cmd.pCflags, " -Wno-reserved-macro-identifier -Wno-sign-conversion");
+		}
+
+		SELF_APPEND(cmd.pCflags, " /nologo");
 		SELF_APPEND(cmd.pCflags, " /Zi");
 	}
 	SELF_PREPEND_WITH_FLAGS(cmd.pDefines, DEFINEFLAG, "PLATFORM_WINDOWS");
@@ -267,13 +283,23 @@ CompileCfiles(Command* pCmd, FileList* pList, char **ppOut, bool silent, bool bM
 {
 	yError result = Y_SUCCESS;
 
-	char *OUTFLAG	= NULL;
-	char *MODEFLAG	= NULL;
+	char*	OUTFLAG				= NULL;
+	char*	MODEFLAG			= NULL;
+	char*	DEBUG_FOLDER		= NULL;
+	char*	OUT_DEBUG_FOLDER	= NULL;
+
 	if (StrIsEqual("clang", pCmd->pCc) || StrIsEqual("gcc", pCmd->pCc))
 	{
 		OUTFLAG = STR("-o");
 		MODEFLAG = STR("-c");
 	}
+	else
+	{
+		OUTFLAG = STR("/Fo:");
+		MODEFLAG = STR("/c /Tc");
+		DEBUG_FOLDER = STR("/Fd");
+	}
+
 	// NOTE: Making the path .o files for linker
 	size_t	count				= 0;
 	size_t	total				= 1000000;
@@ -284,38 +310,68 @@ CompileCfiles(Command* pCmd, FileList* pList, char **ppOut, bool silent, bool bM
 	thrd_t*			pThreads	= malloc(sizeof(thrd_t) * pList->elemCount);
 	threadStruct*	pArgs		= malloc(sizeof(threadStruct) * pList->elemCount);
 	char*			pTemp		= malloc(sizeof(char) * total + (pList->elemCount) + 1);
+	mtx_t*			pMtx		= malloc(sizeof(mtx_t));
+
+	MutexInit(pMtx, mtx_plain);
 
 	for (size_t i = 0; i < pList->elemCount; i++)
 	{
 		track += strlen(pList->pFiles[i].pObjName);
 		if (track >= total)
-		{ fprintf(stderr, "Too long linker command %zu\n", track); exit(1); }
+		{ 
+			fprintf(stderr, "Too long linker command %zu\n", track);
+			exit(1);
+		}
 
-		count += sprintf(pTemp + count, "%s ", pList->pFiles[i].pObjName);
+		char*	pOutputName = STR(pList->pFiles[i].pObjName);
+		char*	pFilePath	= STR(pList->pFiles[i].pFullPath);
+		char*	pRawName	= STR(pList->pFiles[i].pFullPath);
 
-		char*	pFilePath	= pList->pFiles[i].pFullPath;
-		char*	pOutputName	= pList->pFiles[i].pObjName;
+		size_t rawSize = strlen(pRawName);
+		for (size_t iterator = 0; iterator < rawSize; iterator++)
+		{
+			if (pRawName[iterator] == '.')
+			{
+				pRawName[iterator] = 0;
+				break;
+			}
+		}
+
+		if (StrIsEqual("cl", pCmd->pCc) || StrIsEqual("clang-cl", pCmd->pCc))
+		{
+			OUT_DEBUG_FOLDER = STR(DEBUG_FOLDER);
+			SELF_APPEND(OUT_DEBUG_FOLDER, pCmd->pBuildDir, SLASH, pRawName,".pdb");
+		}
+
+		if (StrIsEqual("cl", pCmd->pCc) || StrIsEqual("clang-cl", pCmd->pCc))
+			SELF_APPEND(pOutputName, "bj");
+
+		count += sprintf(pTemp + count, "%s ", pOutputName);
+		if (StrIsEqual("cl", pCmd->pCc) || StrIsEqual("clang-cl", pCmd->pCc))
+			pOutputName = PUTINQUOTE(pOutputName);
 
 		ppJson[i] = STR("");
-		char*	pPchFlag = NULL;
-		char*	pTimeReportFlag = NULL;
+		char*	pPchFlag = "";
+		char*	pTimeReportFlag = "";
 
-		if (StrIsEqual(pFilePath, "src"SLASH"renderer"SLASH"vulkan"SLASH"vulkan_loader.c"))
-		{
-			pPchFlag = "-include-pch src"SLASH"pch"SLASH"stb_image_pch.h.pch"
-				" -include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
-
-			pTimeReportFlag = "";
-		}
-		else
-		{
-			pTimeReportFlag = "";
-			pPchFlag = "-include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
-			pPchFlag = "";
-		}
+			/*
+			 * if (StrIsEqual(pFilePath, "src"SLASH"renderer"SLASH"vulkan"SLASH"vulkan_loader.c"))
+			 * {
+			 * 	pPchFlag = "-include-pch src"SLASH"pch"SLASH"stb_image_pch.h.pch"
+			 * 		" -include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
+			 * 
+			 * 	pTimeReportFlag = "";
+			 * }
+			 * else
+			 * {
+			 * 	pTimeReportFlag = "";
+			 * 	pPchFlag = "-include-pch src"SLASH"pch"SLASH"windows_pch.h.pch";
+			 * 	pPchFlag = "";
+			 * }
+			 */
 
 		SELF_APPEND_SPACE(ppJson[i], a.pCc, pTimeReportFlag, a.pCflags, a.pDefines, a.pIncludeDirs, pPchFlag);
-		SELF_APPEND_SPACE(ppJson[i], MODEFLAG, pFilePath, OUTFLAG, pOutputName);
+		SELF_APPEND_SPACE(ppJson[i], MODEFLAG, pFilePath, OUTFLAG, pOutputName, OUT_DEBUG_FOLDER);
 		/* SELF_APPEND_SPACE(ppJson[i], a.pCC, a.pCFLAGS, a.pDEFINES, a.pINCLUDE_DIRS, MODEFLAG, fname, OUTFLAG, outname); */
 		bool bExec = false;
 		if (IsOutdated(pFilePath, pOutputName))
@@ -331,6 +387,7 @@ CompileCfiles(Command* pCmd, FileList* pList, char **ppOut, bool silent, bool bM
 			pArgs[i].silent = silent;
 			pArgs[i].debug	= debug;
 			pArgs[i].id = i;
+			pArgs[i].pMutex = pMtx;
 			pArgs[i].finished = false;
 			pArgs[i].pCmd = ppJson[i];
 			pArgs[i].noExec = bExec;
@@ -380,15 +437,9 @@ Link(Command* pCmd, char *pObj, const char *pOutName, bool silent, bool debug)
 
 	char*	OUTFLAG		= NULL;
 	char*	MODEFLAG	= NULL;
-	char*	LLD_FLAGS	= STR("-fuse-ld=lld");
+	char*	LLD_FLAGS	= NULL;
 	bool	bRebuild	= false;
-	/* char*	LLD_FLAGS	= STR(""); */
 
-	if (StrIsEqual("clang", pCmd->pCc) || StrIsEqual("gcc", pCmd->pCc))
-	{
-		OUTFLAG = STR("-o");
-		MODEFLAG = STR("-c");
-	}
 	char* pTemp = STR(pObj);
 	char* pToken = strtok(pTemp, " ");
 	while (pToken != NULL)
@@ -397,19 +448,34 @@ Link(Command* pCmd, char *pObj, const char *pOutName, bool silent, bool debug)
 			bRebuild = true;
 		pToken = strtok(NULL, " ");
 	}
-
 	if (bRebuild == false)
 	{
 		printf("Nothing to be done.\n");
 		return Y_SUCCESS;
 	}
 
+	if (StrIsEqual("clang", pCmd->pCc) || StrIsEqual("gcc", pCmd->pCc))
+	{
+		OUTFLAG = STR("-o");
+		MODEFLAG = STR("-c");
+		LLD_FLAGS = STR("-fuse-ld=lld");
+	}
+	else
+	{
+		OUTFLAG = STR("/OUT:");
+		SELF_APPEND(a.pLinker, " /NOLOGO");
+	}
+	SELF_APPEND(OUTFLAG, pOutName);
+
 	/* SELF_APPEND_SPACE(pCommand, a.pCC, a.pCFLAGS, a.pDEFINES, pObj, OUTFLAG, pOutName, pCmd->pLIB_PATH, pCmd->pLIBS); */
-	SELF_APPEND_SPACE(pCommand, a.pCc, LLD_FLAGS, a.pCflags, a.pDefines);
-	SELF_APPEND_SPACE(pCommand, pObj, OUTFLAG, pOutName, pCmd->pLibPath, pCmd->pLibs);
+	SELF_APPEND_SPACE(pCommand, a.pLinker, LLD_FLAGS, a.pCflags, a.pDefines);
+	SELF_APPEND_SPACE(pCommand, pObj, OUTFLAG, pCmd->pLibPath, pCmd->pLibs);
 
 	TracyCZoneNC(linkingpart, "Link", 0x00001, 1);
-	JASB_CHECK(EXECUTE(pCommand, pOutName, pOutName, silent, debug));
+	if (EXECUTE(pCommand, pOutName, pOutName, silent, debug))
+	{
+		return Y_ERROR_EXEC;
+	}
 	TracyCZoneEnd(linkingpart);
 	return Y_SUCCESS;
 }
@@ -534,7 +600,7 @@ Build(Command* pCmd, FileList* pCfilesList, FileList* pShadersList, bool bMultiT
 	bool silent	= false;
 
 	if (pShadersList->elemCount > 0)
-		ShadersBuild(pCmd, pShadersList, silent);
+		ShadersBuild(pCmd, pShadersList, true);
 
 	if (pCfilesList->elemCount <= 0) 
 	{ 
@@ -569,11 +635,11 @@ Clean(Command* pCmd)
 	if (gbClean == false)
 		return Y_SUCCESS;
 
-	int a = DeleteDirectory(pCmd->pBuildDir);
+	int a = DeleteDirectory(pCmd->pObjDir);
 	if (a == 0)
 	{
 		dw = GetLastError();
-		PrintErrorMessage(dw);
+		PrintErrorMessageCustom(__FUNCTION__ ,dw);
 		return Y_ERROR_CLEANING;
 	}
 	return Y_SUCCESS;
@@ -588,7 +654,7 @@ Clean(Command* pCmd)
 int
 main(int argc, char **ppArgv)
 {
-	TracyCZoneNC(mainfunc, "main function", 0x00FF00, 1);
+	TracyCZoneNCS(mainfunc, "main function", 0x00FF00, 30, 1);
 
 	ChefInit();
 	if (ArgsCheck(argc, ppArgv) == false)
@@ -600,7 +666,7 @@ main(int argc, char **ppArgv)
 	MKDIR(cmd.pObjDir);
 	MKDIR(cmd.pShaderObjsDir);
 
-	YMB char *pCompileCommands = STR("compile_commands.json");
+	char *pCompileCommands = STR("compile_commands.json");
 
 	/* NOTE: Get C source files in src/ recursively */
 	FileList *pListCfiles = GetFileListAndObjs(&cmd, "*.c");

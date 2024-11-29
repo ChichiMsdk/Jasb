@@ -1,10 +1,16 @@
+#ifndef JASB_STRINGS_C
+#define JASB_STRINGS_C
+
 #include "jasb_strings.h"
+#include "jasb_threads.h"
 
 #include "TracyC.h"
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdarg.h>
+#include <threads.h>
 
 char*
 ChefStrPath(const char* pPath)
@@ -59,18 +65,39 @@ WildcardMatch(const char *pStr, const char *pPattern)
 /*							string memory management						 */
 /*****************************************************************************/
 
+void*
+MyRealloc(void* ptr, size_t size)
+{
+	void* new = malloc(size);
+	return new;
+}
+
 char *
 ChefStrDup(char *pStr)
 {
 	TracyCZoneN(strDup, "ChefStrDup", 1);
+	TracyCLockBeforeLock((struct __tracy_lockable_context_data *)&gChef.mutex);
+	if (mtx_lock(&gChef.mutex) == thrd_error)
+	{
+		fprintf(stderr, "Mutex lock error\n");
+		exit(1);
+	}
+	TracyCLockAfterLock((struct __tracy_lockable_context_data *)&gChef.mutex);
 	if (gChef.nbElems >= gChef.maxSize)
 	{
-		gChef.ppTable = realloc(gChef.ppTable, gChef.maxSize * 2);
+		gChef.ppTable = realloc(gChef.ppTable, sizeof(void *) * gChef.maxSize * 2);
 		gChef.maxSize *= 2;
 	}
 	char *pDup = STRDUP(pStr);
 	gChef.ppTable[gChef.nbElems] = pDup;
 	gChef.nbElems++;
+	if (mtx_unlock(&gChef.mutex) == thrd_error)
+	{
+		fprintf(stderr, "Mutex unlock error\n");
+		exit(1);
+	}
+	TracyCLockAfterUnlock((struct __tracy_lockable_context_data *)&gChef.mutex);
+
 	TracyCZoneEnd(strDup);
 	return pDup;
 }
@@ -83,6 +110,9 @@ ChefInit(void)
 	gChef.ppTable = malloc(sizeof(void*) * CHEF_ALLOC);
 	gChef.nbElems = 0;
 	gChef.maxSize = CHEF_ALLOC;
+
+	MutexInit(&gChef.mutex, mtx_plain);
+	MutexInit(&gChef.mutexRealloc, mtx_plain);
 }
 
 void
@@ -94,6 +124,8 @@ ChefDestroy(void)
 		/* printf("Freeing: \"%s\" at %p\n", (char*)gChef.ppTable[i], gChef.ppTable[i]); */
 		free(gChef.ppTable[i]);
 	}
+	mtx_destroy(&gChef.mutex);
+	mtx_destroy(&gChef.mutexRealloc);
 	TracyCZoneEnd(chefDestroy);
 }
 
@@ -115,10 +147,21 @@ ChefFree(void *pPtr)
 	TracyCZoneEnd(ChefFree);
 }
 
+/* FIXME: Sizes are (1 * size) but char could be > 1 ! */
+/* WARN: Check if NULL !!!!! */
 void *
 ChefRealloc(void *pPtr, size_t size)
 {
 	TracyCZoneN(reall, "ChefRealloc", 1);
+
+	TracyCLockBeforeLock((struct __tracy_lockable_context_data *)&gChef.mutexRealloc);
+	if (mtx_lock(&gChef.mutexRealloc) == thrd_error)
+	{
+		fprintf(stderr, "Mutex lock error\n");
+		exit(1);
+	}
+	TracyCLockAfterLock((struct __tracy_lockable_context_data *)&gChef.mutexRealloc);
+
 	size_t i = 0;
 	for (i = 0; i < gChef.nbElems; i++)
 	{
@@ -128,7 +171,14 @@ ChefRealloc(void *pPtr, size_t size)
 			break;
 		}
 	}
+	if (mtx_unlock(&gChef.mutexRealloc) == thrd_error)
+	{
+		fprintf(stderr, "Mutex unlock error\n");
+		exit(1);
+	}
 	TracyCZoneEnd(reall);
+
+	TracyCLockAfterUnlock((struct __tracy_lockable_context_data *)&gChef.mutexRealloc);
 	return gChef.ppTable[i];
 }
 
@@ -191,13 +241,16 @@ ChefStrAppendWithFlagsImpl(char *pDst, char *pFlag, ...)
 	{
 		if (strlen(pArg) <= 0)
 			continue;
-		size_t srcSize = strlen(pArg);
+		size_t argSize = strlen(pArg);
 		size_t dstSize = strlen(pDst);
-		pDst = ChefRealloc(pDst, dstSize + srcSize + 1 + flagSize + SPACELEN);
-		memcpy(&pDst[dstSize], pFlag, flagSize);
-		memcpy(&pDst[dstSize + flagSize], pArg, srcSize);
-		pDst[dstSize + srcSize + flagSize] = ' ';
-		pDst[dstSize + srcSize + flagSize + 1] = 0;
+
+		pDst = ChefRealloc(pDst, dstSize + argSize + 1 + flagSize + SPACELEN);
+
+		memcpy(&pDst[dstSize], pArg, argSize);
+		memcpy(&pDst[dstSize + argSize], pFlag, flagSize);
+
+		pDst[dstSize + argSize + flagSize] = ' ';
+		pDst[dstSize + argSize + flagSize + 1] = 0;
 	}
 	va_end(args);
 	TracyCZoneEnd(strappend);
@@ -222,8 +275,6 @@ ChefStrPrependWithFlagsImpl(char *pDst, char *pFlag, ...)
 		size_t srcSize = strlen(pArg);
 		size_t dstSize = strlen(pDst);
 
-		char *tmp = malloc(dstSize + 1);
-
 		pDst = ChefRealloc(pDst, dstSize + srcSize + 1 + flagSize + SPACELEN);
 
 		memcpy(&pDst[dstSize], pFlag, flagSize);
@@ -231,8 +282,6 @@ ChefStrPrependWithFlagsImpl(char *pDst, char *pFlag, ...)
 
 		pDst[dstSize + srcSize + flagSize] = ' ';
 		pDst[dstSize + srcSize + flagSize + 1] = 0;
-
-		free(tmp);
 	}
 	va_end(args);
 	TracyCZoneEnd(prepend);
@@ -254,3 +303,5 @@ ChefStrSurroundImpl(char *pDst, char *pSurround)
 	TracyCZoneEnd(surround);
 	return tmp;
 }
+
+#endif //JASB_STRINGS_C

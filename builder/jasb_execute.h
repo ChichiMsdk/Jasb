@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
+#include <threads.h>
 
 typedef struct threadStruct
 {
@@ -15,13 +17,14 @@ typedef struct threadStruct
 	bool			noExec;
 	int				id;
 	_Atomic _Bool	finished;
+	mtx_t*			pMutex;
 
 }threadStruct;
 
-int	ThreadExecShaders(void* args);
-int ThreadExec(void* args);
-int ExecuteImpl(const char* pCommand, const char* pFile, const char* pTarget, bool dry, bool debug);
-int IsOutdated(const char* pDependency, const char* pTarget);
+int		ThreadExecShaders(void* args);
+int 	ThreadExec(void* args);
+int 	ExecuteImpl(const char* pCommand, const char* pFile, const char* pTarget, bool dry, bool debug);
+int 	IsOutdated(const char* pDependency, const char* pTarget);
 
 #define EXECUTE(x, str, str2, y, z) ExecuteImpl(x, str, str2, y, z)
 

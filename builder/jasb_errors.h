@@ -23,7 +23,7 @@ extern char *pErrorMsg[];
 		yError result = Y_SUCCESS; \
 		result = expr; \
 		if (result != Y_SUCCESS) { \
-			printf("Error: %s\n", GetErrorMsg(result));\
+			fprintf(stderr, "\"%s:%d\"[%d]: %s\n", __FILE__, __LINE__, result, GetErrorMsg(result));\
 			return result; \
 		} \
 	} while(0);

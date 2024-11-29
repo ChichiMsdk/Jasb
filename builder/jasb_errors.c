@@ -1,3 +1,6 @@
+#ifndef JASB_ERRORS_C
+#define JASB_ERRORS_C
+
 #include "jasb_errors.h"
 
 char *pErrorMsg[] = {
@@ -23,3 +26,4 @@ GetErrorMsg(int error)
 #elif __linux__
 
 #endif
+#endif // JASB_ERRORS_C

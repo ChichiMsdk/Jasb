@@ -37,6 +37,7 @@ typedef struct Command
 	char *pObjDir;
 	char *pCc;
 	char *pCpp;
+	char *pLinker;
 	char *pGlslc;
 	char *pSrcDir;
 	char *pShaderDir;

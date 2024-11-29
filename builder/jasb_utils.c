@@ -1,6 +1,9 @@
 /*****************************************************************************/
 								/*WINDOWS*/
 /*****************************************************************************/
+#ifndef JASB_UTILS_C
+#define JASB_UTILS_C
+
 #include "jasb_utils.h"
 #include "jasb_strings.h"
 
@@ -483,7 +486,7 @@ PrintErrorMessage(unsigned long dw)
 }
 
 void
-PrintErrorMessageCustom(char* s, unsigned long dw)
+PrintErrorMessageCustom(const char* s, unsigned long dw)
 {
 	char* buf = GetErrorMessageStr(dw);
 	fprintf(stderr, "\"%s\": %s", s, buf);
@@ -504,7 +507,7 @@ MkdirImpl(char *pPath)
 	{
 		size_t lenCwd = strlen(pCwd);
 		size_t lenStr = strlen(pStr);
-		finalPath = malloc(sizeof(char) * (lenCwd + lenStr + 1));
+		finalPath = malloc(sizeof(char) * (lenCwd + lenStr + 2));
 		sprintf(finalPath, "%s\\%s", pCwd, pStr);
 	}
 	else
@@ -527,12 +530,12 @@ MkdirImpl(char *pPath)
 	else
 		printf("Creating \"%s\"...\n", finalPath);
 
-	free(finalPath);
+	ChefFree(finalPath);
 	return error;
 }
 
 void
-findDirWin([[maybe_unused]] const char *path)
+findDirWin(const char *path)
 {
 	WIN32_FIND_DATA findData;
 	char newPath[MAX_PATH];
@@ -749,3 +752,5 @@ ErrorExit(char *pMsg)
 	exit(1);
 }
 #endif
+
+#endif //JASB_UTILS_C

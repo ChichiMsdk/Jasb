@@ -1,3 +1,5 @@
+#ifndef JASB_COMPILE_COMMANDS_C
+#define JASB_COMPILE_COMMANDS_C
 #include "jasb_compile_commands.h"
 
 #include <stdio.h>
@@ -116,3 +118,4 @@ CompileCmdJson(char **ppCmds, size_t nbCmds)
      */
 	return Y_SUCCESS;
 }
+#endif

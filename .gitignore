@@ -9,7 +9,6 @@ fold1/
 example
 cmd.txt
 *.json
-src/
 thirdparty/
 Makefile
 Makefile.linux

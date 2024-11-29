@@ -5,6 +5,7 @@
 #define JASB_STRINGS_H
 
 #include <stdbool.h>
+#include <threads.h>
 
 #ifdef _WIN32
 #define SLASH "\\"
@@ -19,9 +20,11 @@ int WildcardMatch(const char *pStr, const char *pPattern);
 
 typedef struct MemChef
 {
-	void **ppTable;
-	size_t nbElems;
-	size_t maxSize;
+	void**	ppTable;
+	size_t	nbElems;
+	size_t	maxSize;
+	mtx_t	mutex;
+	mtx_t	mutexRealloc;
 } MemChef;
 
 extern	MemChef gChef;
@@ -60,7 +63,7 @@ char*	ChefStrPath(const char* pPath);
 
 #define ADD_FLAGS(dst, flags, ...) \
 	do { \
-		if (strcmp(flags, "-lib") == 0) { \
+		if (strcmp(flags, ".lib") == 0) { \
 			SELF_APPEND_WITH_FLAGS(dst, flags, __VA_ARGS__); \
 		} \
 		if (strcmp(flags, "-l") == 0) { \
